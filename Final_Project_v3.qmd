@@ -1,0 +1,583 @@
+---
+title: "Final Report - Team 6"
+author: 
+  - name: "Sanjana Sankar"
+    id: "ss7633"
+    role: "Student"
+    email: "ss7633@columbia.edu"
+    affiliation: "Columbia University SPS"
+  - name: "Shujia Zhang"
+    id: "sz3411"
+    role: "Student"
+    email: "sz3411@columbia.edu"
+    affiliation: "Columbia University SPS"
+  - name: "Feiyue Gai"
+    id: "fg2630"
+    role: "Student"
+    email: "fg2630@columbia.edu"
+    affiliation: "Columbia University SPS"
+  - name: "Bingjian Dai"
+    id: "bd2801"
+    role: "Student"
+    email: "bd2801@columbia.edu"
+    affiliation: "Columbia University SPS"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+editor: visual
+execute:
+  warning: false
+  message: false
+  cache: true
+format:
+  html:
+    toc: true
+    number-sections: false
+    code-fold: true
+    code-tools: true
+    code-link: true
+    theme:
+      light: flatly
+      dark: darkly
+    embed-resources: true
+---
+
+# **Proposal to Guide Smarter Artist Acquisition Strategies using Spotify Analytics** {#proposal_title}
+
+#### **To: Naras Eechambadi, Chief Global Data and Analytics Officer, Universal Music Group** {#addressed_to}
+
+Predictive insights from Spotify streaming data can reveal significant patterns in emerging listener trends which can guide talent acquisition and marketing investment for Universal Music Group. Streaming platforms dominate global music consumption and can provide real-time information about which genres, tracks, and artists resonate with listeners worldwide.
+
+According to Wreckd Productions, Major labels often sign artists only after they’ve built an online fan base (*Wreckd Productions, n.d.*). However, this reactive model leaves huge potential on the table. Thus, we propose Universal Music Group adopt a proactive approach by using real-time Spotify API to spot early traction signals such as genre spikes, playlist growth, and micro-regional fan surges before artists go mainstream.
+
+As a result, our team aims to provide Universal with actionable, data-driven visibility into rising artists and audience trends, enabling faster, more informed decisions in artist acquisition and marketing investments. To leverage this proactive A&R approach, our team analyzed Spotify’s API, focusing on metrics tied to popularity, genre concentration, and streaming momentum.
+
+Our team used the Spotify Web API to collect data on artists, tracks, and playlists. We connected the API to R using packages such as `httr` and `jsonlite` to send requests and extract information like stream counts, artist popularity, playlist appearances, and audio features. We also utilized a [Kaggle dataset](https://www.kaggle.com/datasets/zaheenhamidani/ultimate-spotify-tracks-db) that provided information on the behavior "between valence and all the measures that Spotify API provided" to enhance our analysis (*Kaggle n.d.*).
+
+Once we collected the data, we used R for data cleaning and exploratory data analysis. Using packages such as `dplyr`, `tidyr`, and `lubridate`, we organized and aggregated weekly data to identify patterns of growth across artists and genres. Visualizations were created using `ggplot2` and `plotly`, including trend lines for streaming velocity and/or emerging genres and scatter plots highlighting breakout potential.
+
+Through these analyses and visualizations, our team uncovered two methods to facilitate the acquisition of rising talent.
+
+## Popularity Momentum {#popularity_momentum}
+
+The Popularity Momentum Chart (log-scaled) displays the expected upward trend yet also exposes several recent breakthrough artists such as Chappel Roan, Tate McRae, Sabrina Carpenter, etc. These are valuable outliers who are resonating on platforms and rose to fame rapidly over the past few years. These artists represent priority opportunities for social amplification, playlist nurturing, and collaboration campaigns.
+
+```{r}
+#| label: popularity momentum graph
+
+#| warning: false
+#| message: false
+#| label: popularity-momentum
+#| echo: false
+
+
+# packages:
+library(httr)
+library(purrr)
+library(plotly)
+library(ggplot2)
+library(jsonlite)
+library(tibble)
+library(dplyr)
+library(magrittr)
+library(lubridate)
+
+# API connection to Spotify:
+resp <- POST(
+  url = "https://accounts.spotify.com/api/token", # https://localhost:8888/callback
+  authenticate('5a57ce9e2c9f44c089092f482233fde7', '731558c75a4b4b22a1a01a7e3ba8b444'),
+  body = list(grant_type = "client_credentials"),
+  encode = "form"
+)
+stop_for_status(resp)
+token <- content(resp)$access_token
+auth  <- add_headers(Authorization = paste("Bearer", token))
+# print(token)
+
+# artists:
+artist_ids <- c(
+  "7GlBOeep6PqTfFi59PTUUN", # Chappell Roan
+  "45dkTj5sMRSjrmBSBeiHym", # Tate McRae
+  "74KM79TiuVKeVCqs8QtB0B", # Sabrina Carpenter
+  "2FXC3k01G6Gw61bmprjgqS", # Hozier
+  "33qOK5uJ8AR2xuQQAhHump", # Teddy Swims
+  "1iCnM8foFssWlPRLfAbIwo", # Gigi Perez
+  "1McMsnEElThX1knmY4oliG", # Olivia Rodrigo
+  "22wbnEMDvgVIAGdFeek6ET", # Benson Boone
+  "1r1uxoy19fzMxunt3ONAkG"  # Phoebe Bridgers
+)
+
+# pull data:
+get_top_tracks <- function(artist_id) {
+  url <- paste0("https://api.spotify.com/v1/artists/", artist_id, "/top-tracks?market=US")
+  resp <- GET(url, add_headers(Authorization = paste("Bearer", token)))
+  stop_for_status(resp)
+  jsonlite::fromJSON(content(resp, as = "text"))$tracks
+}
+
+tracks_list <- map(artist_ids, get_top_tracks)
+
+safe_main_artist <- function(artist_list) {
+  if (is.null(artist_list) || length(artist_list) == 0) {
+    return(NA_character_)
+  }
+  if (is.null(artist_list[[1]]$name)) {
+    return(NA_character_)
+  }
+  return(artist_list[[1]]$name)
+}
+
+# data transformation:
+tracks_df <- map_dfr(
+  seq_along(tracks_list),
+  function(i) {
+    tr <- tracks_list[[i]]
+
+    tibble(
+      artist_id    = rep(artist_ids[i], length(tr$name)),
+      artist       = map_chr(tr$artists, safe_main_artist),
+      track_name   = tr$name,
+      popularity   = tr$popularity,
+      album        = tr$album$name,
+      release_date = tr$album$release_date
+    )
+  }
+)
+
+get_artist_name <- function(id) {
+  url <- paste0("https://api.spotify.com/v1/artists/", id)
+  resp <- GET(url, add_headers(Authorization = paste("Bearer", token)))
+  stop_for_status(resp)
+  jsonlite::fromJSON(content(resp, as = "text"))$name
+}
+
+artist_lookup <- tibble(
+  artist_id = artist_ids,
+  artist = sapply(artist_ids, get_artist_name)
+)
+
+
+artist_names <- sapply(artist_ids, get_artist_name)
+
+tracks_df <- map_dfr(
+  seq_along(tracks_list),
+  function(i) {
+    tr <- tracks_list[[i]]
+    
+    tibble(
+      artist_id    = rep(artist_ids[i], length(tr$name)),
+      track_name   = tr$name,
+      popularity   = tr$popularity,
+      album        = tr$album$name,
+      release_date = tr$album$release_date
+    )
+  }
+)
+
+tracks_df <- tracks_df %>%
+  left_join(artist_lookup, by = "artist_id")
+
+tracks_clean <- tracks_df %>%
+  mutate(
+    release_date = suppressWarnings(as.Date(release_date)),
+    popularity   = as.numeric(popularity)
+  ) %>%
+  filter(!is.na(release_date), !is.na(popularity))
+
+# interaction plot:
+p <- ggplot(tracks_clean, aes(
+  x = release_date,
+  y = popularity,
+  color = artist
+)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(formula = 'y ~ x', se = FALSE, linewidth = 1, method = "loess") +
+  labs(
+    title = "Track Popularity Momentum (9 Rising Artists)",
+    subtitle = "Newer tracks gaining popularity indicate rising momentum",
+    x = "Release Date",
+    y = "Spotify Popularity (0–100)",
+    color = "Artist"
+  ) +
+  theme_minimal(base_size = 7) +
+  theme(legend.position = "right") +
+  guides(color = guide_legend(ncol = 2))
+
+ggplotly(p)
+
+```
+
+Below is an animatated version of the graph showing the increase in popularity over time.
+
+```{r eval=FALSE}
+#| label: animation portion
+# animation:
+library(gganimate)
+
+loess_df <- tracks_clean %>%
+  group_by(artist) %>%
+  do({
+    df <- .
+    if (nrow(df) >= 4) {
+      fit <- loess(popularity ~ as.numeric(release_date), data = df, span = 0.7)
+      df$loess_pred <- predict(fit)
+    } else {
+      df$loess_pred <- NA
+    }
+    df
+  }) %>% ungroup()
+
+p_anim <- ggplot(loess_df, aes(
+  x = release_date,
+  y = popularity,
+  color = artist
+)) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_line(aes(y = loess_pred), linewidth = 1, alpha = 0.8) +
+  labs(
+    title = "Popularity Momentum Over Time",
+    subtitle = "Date: {frame_along}",
+    x = "Release Date",
+    y = "Popularity (0–100)"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "right") +
+  transition_reveal(release_date)
+
+anim <- animate(
+  p_anim,
+  nframes = 150,
+  fps = 12,
+  width = 900,
+  height = 600,
+  renderer = gifski_renderer()
+)
+anim_save("pop_momentum.gif", anim)
+```
+
+![](pop_momentum.gif){fig-alt="Popularity Momentum Over Time"}
+
+[Figure 1.1: Stream popularity over time in Spotify (interactive momentum graph)]{style="color: gray;"}
+
+This popularity momentum curve helps identify which rising artists are on a growth trajectory likely to result in a hit. The rapid upward trends in the last 12 to 18 months and high clustering toward the popularity range from 80 to 100. Moreover, the recent fluctuations are a strong indicator suggesting a potential breakthrough.
+
+Based on these signals, Tate McRae, Sabrina Carpenter, Benson Boone, and Chappell Roan have demonstrated a clear acceleration trend, which is consistent with the early acceleration phases experienced by those previous successful artists who broke through. On the other hand, artists like Hozier and Phoebe Bridgers show a consistent stability, but do not possess the rapid upward momentum associated with a mainstream breakthrough even though they are artists who recently shot to fame.
+
+::: {.callout-note title="Key Takeaway"}
+By analyzing Spotify popularity momentum, we can identify rising artists who are gaining traction before they hit mainstream fame. This early insight allows Universal to proactively invest in marketing, playlist placement, collaborations, and other promotional strategies to accelerate growth. Artists showing rapid upward trends represent priority opportunities, while those with stable but slower growth may require different strategies. Leveraging these data-driven signals enables Universal to reduce A&R risk, allocate resources efficiently, and increase the likelihood of backing the next breakout artist at the optimal moment.
+:::
+
+## Listening Trends using Genres and Playlists {#listening_trends_genre_playlists}
+
+#### Genres
+
+Analyzing which genres and playlists users prefer can help Universal strategically allocate resources, tailor marketing efforts, and focus on content that resonates most with listeners.The bubble chart below visualizes how different music genres perform in terms of early traction for new artists on Spotify. The goal is to compare genres based on how well they support initial exposure, popularity growth, and artist participation.
+
+```{r}
+#| label: bubble chart
+
+#loading packaches
+
+library(readr)
+library(dplyr)
+library(tibble)
+library(httr)
+library(jsonlite)
+library(stringr)
+library(ggplot2)
+library(plotly)
+library(purrr)
+df <- read_csv("SpotifyFeatures.csv")
+
+resp <- POST(
+  url = "https://accounts.spotify.com/api/token",
+  authenticate('5a57ce9e2c9f44c089092f482233fde7',
+               '731558c75a4b4b22a1a01a7e3ba8b444'),
+  body = list(grant_type = "client_credentials"),
+  encode = "form"
+)
+
+stop_for_status(resp)
+token <- content(resp)$access_token
+auth <- add_headers(Authorization = paste("Bearer", token))
+
+
+get_sp_artist_id <- function(name) {
+
+  q <- URLencode(name, reserved = TRUE)
+
+  url <- paste0(
+    "https://api.spotify.com/v1/search?q=", q,
+    "&type=artist&limit=5"
+  )
+
+  res <- try(GET(url, auth), silent = TRUE)
+  if (!inherits(res, "response") || status_code(res) != 200)
+    return(NA_character_)
+
+  # JSON parse 
+  json <- try(fromJSON(content(res, "text", encoding="UTF-8"),
+                       simplifyVector = FALSE), silent = TRUE)
+  if (inherits(json, "try-error")) return(NA_character_)
+
+  items <- json$artists$items
+  if (is.null(items) || length(items) == 0) return(NA_character_)
+
+  #  extraction of names
+  safe_names <- sapply(items, function(item) {
+    if (is.list(item) && !is.null(item$name) && length(item$name) == 1)
+      return(item$name)
+    return(NA_character_)
+  })
+
+  exact_idx <- which(tolower(safe_names) == tolower(name))
+  if (length(exact_idx) > 0) {
+    item <- items[[exact_idx[1]]]
+    if (is.list(item) && !is.null(item$id)) return(item$id)
+  }
+
+  contains_idx <- which(grepl(tolower(name), tolower(safe_names)))
+  if (length(contains_idx) > 0) {
+    item <- items[[contains_idx[1]]]
+    if (is.list(item) && !is.null(item$id)) return(item$id)
+  }
+
+  for (i in seq_along(items)) {
+    item <- items[[i]]
+    if (is.list(item) && !is.null(item$id))
+      return(item$id)
+  }
+
+  return(NA_character_)
+}
+
+
+
+artists_unique <- df %>% distinct(artist_name)
+artists_unique <- artists_unique %>% slice(1:300)
+
+artists_id_map <- artists_unique %>%
+  mutate(spotify_id = sapply(artist_name, get_sp_artist_id)) %>%
+  distinct(artist_name, .keep_all = TRUE) %>%
+  mutate(
+    spotify_id = ifelse(is.na(spotify_id), NA_character_, spotify_id)
+  )
+
+
+get_artist_meta <- function(id) {
+
+  if (is.null(id) || length(id) == 0 || is.na(id)) {
+    return(tibble(
+      spotify_id = NA_character_,
+      followers = NA_real_,
+      artist_popularity = NA_real_,
+      artist_name_spotify = NA_character_
+    ))
+  }
+
+  url <- paste0("https://api.spotify.com/v1/artists/", id)
+  res <- try(GET(url, auth), silent = TRUE)
+
+  if (!inherits(res, "response") || status_code(res) != 200) {
+    return(tibble(
+      spotify_id = id,
+      followers = NA_real_,
+      artist_popularity = NA_real_,
+      artist_name_spotify = NA_character_
+    ))
+  }
+
+  dat <- fromJSON(content(res, "text", encoding="UTF-8"))
+
+  tibble(
+    spotify_id = id,
+    followers = dat$followers$total,
+    artist_popularity = dat$popularity,
+    artist_name_spotify = dat$name
+  )
+}
+
+artist_meta <- map_dfr(artists_id_map$spotify_id, get_artist_meta) %>%
+  distinct(spotify_id, .keep_all = TRUE)
+
+df_merged <- df %>%
+  left_join(artists_id_map, by = "artist_name") %>%
+  left_join(artist_meta,   by = "spotify_id")
+
+
+df_merged <- df_merged %>%
+  mutate(
+    is_new = followers <= 4000000,
+    is_established = followers >= 10000000,
+    artist_type = case_when(
+      is_new ~ "New Artist (≤4M)",
+      is_established ~ "Established Artist (≥10M)",
+      TRUE ~ "Mid-tier Artist"
+    )
+  )
+
+
+genre_traction <- df_merged %>%
+  filter(is_new) %>%
+  group_by(genre) %>%
+  summarise(
+    avg_popularity = mean(popularity, na.rm = TRUE),
+    track_count = n(),
+    n_artists = n_distinct(artist_name),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(avg_popularity))
+
+
+
+#Bubble Chart (Final Visualization)
+
+bubble_df <- genre_traction %>% filter(!is.na(genre))
+
+p_bubble <- ggplot(
+  bubble_df,
+  aes(
+    x = genre,
+    y = avg_popularity,
+    size = track_count,
+    color = n_artists,
+    text = paste0(
+      "Genre: ", genre, "<br>",
+      "Avg Popularity: ", round(avg_popularity, 1), "<br>",
+      "Tracks: ", track_count, "<br>",
+      "New Artists: ", n_artists
+    )
+  )
+) +
+  geom_point(alpha = 0.7) +
+  scale_size_continuous(range = c(5, 25)) +
+  scale_color_gradient(low = "skyblue", high = "darkblue") +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "Genre Early Traction for New Artists (Bubble Chart)",
+    x = "Genre",
+    y = "Average Popularity",
+    size = "Track Count",
+    color = "New Artists Count"
+  )
+
+plotly::ggplotly(p_bubble, tooltip = "text")
+
+```
+
+[Figure 1.2: Average stream popularity vs. genres in Spotify (Bubble Map)]{style="color: gray;"}
+
+Each bubble represents a distinct music genre included in the dataset (x-axis: genre). The vertical position of each bubble reflects the average track popularity for new artists within that genre. Higher values suggest that songs by new artists in that genre tend to perform better on Spotify (y-axis: Average Popularity or Early Traction). The size of each bubble corresponds to the number of tracks produced by new artists within that genre, so larger bubbles suggest that more tracks are released by new artists.The color gradient (light blue to dark blue) reflects the number of new artists in each genre. This adds a third dimension, allowing us to see whether a genre attracts many new creators or only a small group.
+
+::: {.callout-note title="Key Takeaway"}
+Some genres cluster around higher popularity scores, meaning they offer stronger early traction. Others show lower average popularity, suggesting that new artists in those genres face slower initial growth. Large, dark bubbles near lower popularity (Movie music) values indicate genres where many new artists participate but struggle to gain early momentum. Smaller bubbles at higher popularity (Pop, Rock, R&B) values indicate niches where new artists achieve strong early performance despite lower participation. Genres positioned toward the top of the chart show relatively better early traction for newcomers.
+
+For Universal Music Group, this shows how leveraging resources on artists in a certain group can help invest in successful players in the music industry for long term growth as certain genres have higher growth potential than others, indicating a potential for data-driven acquisition strategy.
+:::
+
+#### Playlists
+
+In addition to analyzing the genres users prefer, understanding the correlation between growth and the appearances a song has in unique playlists can help reveal a hidden relationship. The heatmap below visualizes how playlist exposure relates to the performance of tracks across different genres using real Kaggle and Spotify merged data. Since the Kaggle dataset does not contain explicit playlist appearance counts, we use Spotify artist followers as a practical proxy for playlist exposure, based on the assumption that artists with larger audiences are more likely to be featured in more influential playlists. We derive an approximate playlist count by scaling followers and constraining it to be at least one.
+
+```{r}
+#| label: heatmap setup
+
+# Heatmap / scatter: playlist "count" vs stream growth
+
+library(dplyr)
+library(ggplot2)
+library(plotly)
+
+df_heat <- df_merged %>%
+  filter(
+    !is.na(genre),
+    !is.na(popularity),
+    !is.na(followers)
+  ) %>%
+  group_by(genre) %>%
+  mutate(
+    genre_pop_median = median(popularity, na.rm = TRUE),
+    stream_growth    = popularity - genre_pop_median
+  ) %>%
+  ungroup() %>%
+ 
+  mutate(
+    playlist_count = pmax(1, round(followers / 100000))  
+  )
+
+```
+
+```{r}
+#| label: heatmap visual
+
+# Heatmap-style scatter: x = playlist_count, y = stream_growth
+
+p_heat <- ggplot(
+  df_heat,
+  aes(
+    x    = playlist_count,
+    y    = stream_growth,
+    color = genre,
+    text  = paste0(
+      "Track: ", track_name, "<br>",
+      "Artist: ", artist_name, "<br>",
+      "Genre: ", genre, "<br>",
+      "Followers: ", followers, "<br>",
+      "Playlist count (proxy): ", playlist_count, "<br>",
+      "Popularity: ", popularity, "<br>",
+      "Stream growth: ", round(stream_growth, 2)
+    )
+  )
+) +
+  geom_jitter(alpha = 0.6, width = 0.3, height = 0) +
+  scale_color_viridis_d(option = "turbo") +   
+  labs(
+    title = "Playlist appearances vs. stream growth ",
+    x     = "Playlist count",
+    y     = "Stream growth ",
+    color = "Genre"
+  ) +
+  theme_minimal(base_size = 13)
+
+p_heat_interactive <- ggplotly(p_heat, tooltip = "text")
+p_heat_interactive
+
+```
+
+[Figure 1.3: Playlist appearances vs. stream growth (Interactive heatmap-style scattermap)]{style="color: gray;"}
+
+To measure performance improvement, we computed a genre-normalized stream growth metric: {stream_growth} = {track popularity} - {median popularity of that genre}.
+
+This formulation indicates how much a track over- or under-performs compared with a “typical” track in its own genre, controlling for baseline differences between genres.
+
+In the heatmap-style scattermap, the x-axis represents the proxy for playlist appearances, the y-axis represents stream growth, and the color encodes the track’s genre.
+
+::: {.callout-note title="Key Takeaway"}
+Most genres cluster at low playlist counts, indicating that many artists in the data set have relatively modest follower bases. Genres such as Pop and Alternative show broader spread across the x-axis, suggesting higher variability in playlist exposure and larger artist audiences.
+
+Tracks with exceptionally high playlist count (high-follower artists) tend to show mixed but relatively narrower stream growth values, implying that high exposure alone does not guarantee disproportionately higher performance. Some genres (e.g., Country, Hip-Hop) exhibit more upward spread in stream growth despite moderate playlist exposure, which may reflect organic demand or genre-specific dynamics.
+
+From a managerial perspective, this visualization helps the CMO evaluate which genres scale well with playlist exposure and which genres exhibit intrinsic growth beyond exposure effects. For example, if certain genres consistently outperform their median popularity even with limited exposure, they may present high-ROI promotional opportunities. Conversely, genres that require substantial playlist presence to move above their growth baseline may call for targeted playlist-placement strategies.
+:::
+
+## Conclusion {#conclusion}
+
+Overall, our analysis shows that Spotify can reveal early momentum signals that help Universal Music Group identify rising artists before they reach mainstream recognition. Popularity growth patterns and genre-level traction can highlight which artists and genres are gaining rapid attention and may warrant earlier investment. Universal can evaluate talent with far greater accuracy by combining streaming trends, playlist performance, and artist metadata. These insights support more efficient marketing decisions by focusing resources on artists and genres demonstrating strong upward trajectories since these decisions will be made based off data-driven insights. Together, these findings show how a proactive, data-driven A&R strategy can help Universal secure competitive advantage in discovering and supporting the next wave of breakthrough artists.
+
+### Citations
+
+Hamidani, Z. (n.d.). *Ultimate Spotify Tracks DB* \[Data set\]. Kaggle. Retrieved November 25, 2025, from https://www.kaggle.com/datasets/zaheenhamidani/ultimate-spotify-tracks-db
+
+Mullarkey, M. (2022, January 6). *Get your Spotify data via R right away*. Michael Mullarkey. https://mcmullarkey.github.io/mcm-blog/posts/2022-01-07-spotify-api-r/
+
+Spencer, S. (2023). *11. Animation and pacing, interactive docs, story* \[Slide deck\]. Storytelling with Data, Columbia University. https://ssp3nc3r.github.io/comm-course-ds-2023-01/slides-11.html
+
+Spotify. (n.d.). *Spotify charts - Spotify charts are made by fans*. Spotify Charts - Spotify Charts are made by fans. https://charts.spotify.com/home 
+
+Wreckd Productions. (n.d.). *3 ways major record labels discover their music artists*. Wreckd Productions. https://wreckdproductions.com/3-ways-major-record-labels-discover-their-music-artists/
+
+Afroplug. (2023, July 27). *Spotify Charts: How does it work?* Afroplug. https://afroplug.com/spotify-charts-how-does-it-work/
+
+### Appendix
